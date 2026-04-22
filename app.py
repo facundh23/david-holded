@@ -965,18 +965,6 @@ with st.spinner("Cargando gastos y empleados..."):
 synced_ids      = get_synced_ids()
 fiscal_cache    = _load_fiscal_cache()
 
-# Buscar automáticamente nombres fiscales por CIF — solo una vez por sesión
-if not st.session_state.get("_fiscal_resolved"):
-    _tins_missing = set()
-    for _e in all_expenses:
-        _a = _e.get("attributes", _e)
-        _tin = re.sub(r'[\s\-\.]', '', (_a.get("merchant_tin") or "")).upper()
-        if _tin and len(_tin) >= 5 and _tin not in fiscal_cache:
-            _tins_missing.add(_tin)
-    if _tins_missing:
-        with st.spinner(f"Buscando nombres fiscales para {len(_tins_missing)} proveedor(es)..."):
-            fiscal_cache.update(resolve_fiscal_names(all_expenses))
-    st.session_state["_fiscal_resolved"] = True
 
 merchant_idx    = _build_merchant_index(all_expenses, fiscal_cache)
 employee_names  = sorted({n for n in employees.values() if n})
