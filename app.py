@@ -1198,6 +1198,58 @@ if not df_synced.empty:
             st.code(num, language=None)
             st.caption(name)
 
+# ── Exportar CSV para Holded ──────────────────────────────────────────────────
+st.divider()
+st.subheader("📥 Exportar para importar en Holded")
+
+_export_ids = selected_ids if selected_ids else list(df["ID"].astype(str))
+_export_expenses = [e for e in all_expenses
+                    if str(e.get("id") or (e.get("attributes", e)).get("id")) in set(_export_ids)]
+
+if _export_expenses:
+    city_cache_exp = _load_city_cache()
+    city_idx_exp   = _build_city_index(_export_expenses, city_cache_exp)
+    _export_rows = []
+    for e in _export_expenses:
+        a      = e.get("attributes", e)
+        tin    = (a.get("merchant_tin") or "").strip()
+        raw_date = (a.get("effective_on") or "")[:10]
+        fecha  = _shift_march_to_april(raw_date)
+        try:
+            fecha_fmt = _date.fromisoformat(fecha).strftime("%d/%m/%Y")
+        except Exception:
+            fecha_fmt = fecha
+        fiscal = get_fiscal_name(tin, a.get("merchant_name") or "", fiscal_cache,
+                                 _build_merchant_index([e], fiscal_cache))
+        city   = get_city(tin, city_cache_exp, a.get("merchant_name") or "", city_idx_exp)
+        desc   = (a.get("description") or a.get("merchant_name") or "")
+        _export_rows.append({
+            "Num factura":              str(e.get("id") or a.get("id")),
+            "Fecha":                    fecha_fmt,
+            "Fecha de vencimiento":     fecha_fmt,
+            "Fecha deducción":          fecha_fmt,
+            "Descripción":              desc,
+            "Nombre del contacto":      fiscal,
+            "NIF":                      tin,
+            "Dirección":                "",
+            "Población":                city,
+            "Código postal":            "",
+            "Provincia":                "",
+            "País":                     "España",
+            "Concepto":                 _get_category_name(a),
+        })
+    df_export = pd.DataFrame(_export_rows)
+    csv_bytes  = df_export.to_csv(index=False, sep=";", encoding="utf-8-sig").encode("utf-8-sig")
+    label = f"Seleccionados ({len(_export_ids)})" if selected_ids else f"Todos ({len(_export_ids)})"
+    st.download_button(
+        label=f"⬇️ Descargar CSV para Holded — {label}",
+        data=csv_bytes,
+        file_name="holded_import.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+    st.caption("Separador: punto y coma · Codificación: UTF-8 · Importar en Holded → Compras → Importar")
+
 st.divider()
 col_dry, col_btn = st.columns([1, 4])
 with col_dry:
