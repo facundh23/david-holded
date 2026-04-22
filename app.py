@@ -1149,6 +1149,40 @@ if not df_synced.empty:
     )
 st.caption(f"{len(selected_ids)} seleccionados")
 
+# ── Descargar facturas adjuntas ───────────────────────────────────────────────
+expenses_with_files = [
+    e for e in all_expenses
+    if (e.get("attributes", e).get("files") or [])
+    and str(e.get("id") or (e.get("attributes", e)).get("id")) in set(df["ID"].astype(str))
+]
+
+if expenses_with_files:
+    st.divider()
+    with st.expander(f"📎 Descargar facturas adjuntas ({len(expenses_with_files)})"):
+        for e in expenses_with_files:
+            a      = e.get("attributes", e)
+            exp_id = str(e.get("id") or a.get("id"))
+            desc   = (a.get("description") or a.get("merchant_name") or "Gasto")[:50]
+            date   = _shift_march_to_april((a.get("effective_on") or "")[:10])
+            amount = round((a.get("amount") or 0) / 100.0, 2)
+            c1, c2 = st.columns([5, 1])
+            c1.write(f"**{date}** · {desc} · {amount} €")
+            dl_key = f"_dl_{exp_id}"
+            if dl_key in st.session_state:
+                data, fname = st.session_state[dl_key]
+                c2.download_button("💾 Guardar", data=data, file_name=fname,
+                                   key=f"save_{exp_id}", use_container_width=True)
+            else:
+                if c2.button("⬇️ Cargar", key=f"fetch_{exp_id}", use_container_width=True):
+                    files = a.get("files") or []
+                    first = files[0] if isinstance(files[0], dict) else {}
+                    path = download_attachment(first, exp_id)
+                    if path and path.exists():
+                        st.session_state[dl_key] = (path.read_bytes(), path.name)
+                        st.rerun()
+                    else:
+                        st.error("No se pudo descargar la factura")
+
 # ── Copiar cuenta contable al portapapeles ───────────────────────────────────
 if not df_synced.empty:
     st.divider()
