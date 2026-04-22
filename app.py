@@ -759,9 +759,20 @@ def _format_employee_tag(full_name: str) -> str:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def to_unix(date_str: str) -> int:
+def _shift_march_to_april(date_str: str) -> str:
+    """Si la fecha es de marzo, la mueve a abril (mismo día)."""
     try:
         d = _date.fromisoformat(date_str[:10])
+        if d.month == 3:
+            return d.replace(month=4).isoformat()
+    except Exception:
+        pass
+    return date_str
+
+def to_unix(date_str: str) -> int:
+    try:
+        shifted = _shift_march_to_april(date_str)
+        d = _date.fromisoformat(shifted[:10])
         return int(datetime(d.year, d.month, d.day).timestamp())
     except Exception:
         return int(datetime.utcnow().timestamp())
@@ -998,6 +1009,13 @@ for e in all_expenses:
     a      = e.get("attributes", e)
     exp_id = str(e.get("id") or a.get("id"))
     emp_id = str(a.get("employee_id") or "")
+    raw_date = (a.get("effective_on") or "")[:10]
+    # Excluir gastos de febrero
+    try:
+        if _date.fromisoformat(raw_date).month == 2:
+            continue
+    except Exception:
+        pass
     taxes        = a.get("taxes") or []
     is_invoice   = (a.get("document_type") or "").lower() == "invoice"
     # IVA solo desgravable si document_type es "invoice" (factura);
@@ -1006,15 +1024,17 @@ for e in all_expenses:
     if taxes and is_invoice:
         rate     = taxes[0].get("percentage") or taxes[0].get("rate") or 0
         vat_rate = rate if rate > 1 else round(rate * 100)
+    display_date = _shift_march_to_april(raw_date)
     rows.append({
         "ID":          exp_id,
         "Empleado":    employees.get(emp_id, emp_id),
-        "Fecha":       (a.get("effective_on") or "")[:10],
+        "Fecha":       display_date,
         "Concepto":    (a.get("description") or a.get("merchant_name") or "—")[:70],
         "Proveedor":   get_fiscal_name(
                            a.get("merchant_tin") or "",
                            a.get("merchant_name") or "—",
                            fiscal_cache, merchant_idx)[:55],
+        "CIF":         (a.get("merchant_tin") or "—"),
         "Importe":     round((a.get("amount") or 0) / 100.0, 2),
         "Moneda":      a.get("currency") or "EUR",
         "Tipo doc.":   "Factura" if is_invoice else "Ticket",
@@ -1058,7 +1078,7 @@ if df.empty:
     st.info("No hay gastos con los filtros actuales.")
     st.stop()
 
-display_cols = ["ID", "Empleado", "Fecha", "Concepto", "Proveedor",
+display_cols = ["ID", "Empleado", "Fecha", "Concepto", "Proveedor", "CIF",
                 "Importe", "Moneda", "Tipo doc.", "IVA %", "IVA desgr.", "Categoría",
                 "Cta. gasto", "Cta. nombre", "Cta. pago", "Medio pago",
                 "Estado", "Adjunto", "En Holded"]
