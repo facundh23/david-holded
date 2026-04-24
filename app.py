@@ -1032,10 +1032,7 @@ for e in all_expenses:
         "ID":          exp_id,
         "Empleado":    employees.get(emp_id, emp_id),
         "Fecha":       display_date,
-        "Concepto":    (
-                           (a.get("description") or a.get("merchant_name") or "—")[:50]
-                           + (" · " + _get_category_name(a) if _get_category_name(a) != "—" else "")
-                       ),
+        "Concepto":    _get_category_name(a),
         "Proveedor":   get_fiscal_name(
                            a.get("merchant_tin") or "",
                            a.get("merchant_name") or "—",
