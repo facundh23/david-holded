@@ -578,7 +578,7 @@ def _parse_fiscal_name(text: str, known_tin: str) -> str | None:
     return None
 
 def _lookup_einforma(tin: str) -> tuple[str | None, str | None]:
-    """Busca razón social y ciudad en einforma.com por CIF/NIF con backoff exponencial.
+    """Busca razón social y ciudad en einforma.com por CIF/NIF.
     Devuelve (razón_social, ciudad) o (None, None)."""
     import html as _html
     clean = re.sub(r'[\s\-\.]', '', tin).upper()
@@ -586,35 +586,26 @@ def _lookup_einforma(tin: str) -> tuple[str | None, str | None]:
         return None, None
     url = f"https://www.einforma.com/servlet/app/portal/ENTP/prod/ETIQUETA_EMPRESA/nif/{clean}"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    delay = 1.0
-    for attempt in range(4):
-        try:
-            r = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
-            if r.status_code == 200 and len(r.text) > 500:
-                text = _html.unescape(r.text)
-                # Razón social
-                name = None
-                m = re.search(r'<h1[^>]*>(.*?)</h1>', text, re.DOTALL)
-                if m:
-                    n = re.sub(r'\s+', ' ', m.group(1)).strip()
-                    if len(n) > 3 and not any(kw in n.lower() for kw in _BUYER_KEYWORDS):
-                        name = n
-                # Ciudad: patrón "Localidad: XXXXX CIUDAD"
-                city = None
-                mc = re.search(r'Localidad:\s*(?:</?\w+[^>]*>\s*)*(\d{5})\s+([^(<\n]+)', text)
-                if mc:
-                    city = mc.group(2).strip()
-                return name, city
-            elif r.status_code == 429:
-                time.sleep(delay)
-                delay *= 2
-                continue
-            else:
-                return None, None
-        except Exception:
-            time.sleep(delay)
-            delay *= 2
+    try:
+        r = requests.get(url, headers=headers, timeout=6, allow_redirects=True)
+        if r.status_code == 200 and len(r.text) > 500:
+            text = _html.unescape(r.text)
+            name = None
+            m = re.search(r'<h1[^>]*>(.*?)</h1>', text, re.DOTALL)
+            if m:
+                n = re.sub(r'\s+', ' ', m.group(1)).strip()
+                if len(n) > 3 and not any(kw in n.lower() for kw in _BUYER_KEYWORDS):
+                    name = n
+            city = None
+            mc = re.search(r'Localidad:\s*(?:</?\w+[^>]*>\s*)*(\d{5})\s+([^(<\n]+)', text)
+            if mc:
+                city = mc.group(2).strip()
+            return name, city
+    except Exception:
+        pass
     return None, None
+
+MAX_FISCAL_LOOKUPS = 50  # máximo por sesión para no bloquear la app
 
 def resolve_fiscal_names(expenses: list) -> dict:
     cache = _load_fiscal_cache()
@@ -622,8 +613,11 @@ def resolve_fiscal_names(expenses: list) -> dict:
     updated = False
     city_updated = False
     seen_tins: set[str] = set()
+    lookups_done = 0
 
     for expense in expenses:
+        if lookups_done >= MAX_FISCAL_LOOKUPS:
+            break
         a = expense.get("attributes", expense)
         tin = (a.get("merchant_tin") or "").strip()
         if not tin:
@@ -657,6 +651,7 @@ def resolve_fiscal_names(expenses: list) -> dict:
         # 2) Buscar en einforma.com (nombre fiscal + ciudad)
         if need_name or need_city:
             fiscal, city = _lookup_einforma(tin)
+            lookups_done += 1
             if fiscal and need_name:
                 cache[clean_tin] = fiscal
                 updated = True
@@ -993,9 +988,15 @@ with st.sidebar:
     st.divider()
     n_cached = len(fiscal_cache)
     st.caption(f"Nombres fiscales en caché: {n_cached}")
-    if st.button("🔍 Resolver nombres fiscales", use_container_width=True,
-                 help="Lee las facturas adjuntas para extraer el nombre fiscal real del proveedor"):
-        with st.spinner("Leyendo facturas para extraer nombres fiscales..."):
+    _tins_pending = sum(
+        1 for e in all_expenses
+        if re.sub(r'[\s\-\.]', '', (e.get("attributes", e).get("merchant_tin") or "")).upper()
+        and re.sub(r'[\s\-\.]', '', (e.get("attributes", e).get("merchant_tin") or "")).upper() not in fiscal_cache
+    )
+    if st.button(f"🔍 Resolver nombres fiscales ({_tins_pending} pendientes)",
+                 use_container_width=True,
+                 help=f"Busca hasta {MAX_FISCAL_LOOKUPS} proveedores por sesión. Pulsa varias veces para completar todos."):
+        with st.spinner(f"Buscando nombres fiscales (máx. {MAX_FISCAL_LOOKUPS})..."):
             fiscal_cache.update(resolve_fiscal_names(all_expenses))
         st.rerun()
     st.divider()
